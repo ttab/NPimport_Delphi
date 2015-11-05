@@ -1,0 +1,8 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>2015-06-11 21:32:14.022.pas,C:\Projekt\Delphi2007\BingoLotto\bingou.pas=C:\Projekt\Delphi2007\NPimport\npimportu.pas</Transaction>
+    <Transaction>2015-06-11 21:32:14.022.dfm,C:\Projekt\Delphi2007\BingoLotto\bingou.dfm=C:\Projekt\Delphi2007\NPimport\npimportu.dfm</Transaction>
+    <Transaction>2015-06-11 21:32:40.463.dproj,C:\Projekt\Delphi2007\BingoLotto\BingoLotto.dproj=C:\Projekt\Delphi2007\NPimport\NPimport.dproj</Transaction>
+  </Transactions>
+</BorlandProject>
