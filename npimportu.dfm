@@ -1,7 +1,7 @@
 object NPimp: TNPimp
   Left = 306
   Top = 148
-  Caption = 'NPimport Version 2015:41:a (D2007)'
+  Caption = 'NPimport Version 2016:16:d (D2007)'
   ClientHeight = 434
   ClientWidth = 603
   Color = clBtnFace

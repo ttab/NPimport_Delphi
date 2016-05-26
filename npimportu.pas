@@ -45,7 +45,7 @@ type
     { Public declarations }
     utfil,infil : tstringlist;
     exepath, datapath,sparpath,loggfilnamn,temppath : string;
-    programnamn : string;
+    programnamn,programversion,programid : string;
     inifil : tinifile;
     intervall : integer;
   end;
@@ -93,7 +93,10 @@ begin
   infil := tstringlist.create;  //Create a stringlist for reading a file
   utfil := tstringlist.create;  //Create a stringlist for writing a file
 
-  nyheartbeat := TTHeartBeater.Create(programnamn);
+  programid := rightstr('0000'+ inttostr(GetCurrentProcessId),4);
+  programversion :=  'v' + GetBuildInfoAsString;
+
+  nyheartbeat := TTHeartBeater.Create(programnamn,programversion,programid);
   nyheartbeat.RaiseExceptionOnError := false;
 
   loggfilnamn := inifil.readstring('Settings','Loggfil','[EXEPATH]npimport_[DATUM].log'); //Filnamn för loggning av rubens aktiviteter. Tomt filnamn betyder ingen loggning
@@ -327,13 +330,18 @@ begin
         end;
 
         if endswith(ansilowercase(filnamn),'.jpg') then  begin
-          filedate := fileage(datapath+filnamn);
-          if FileDateToDateTime( filedate) + 1 < now  then begin
-            Rapportera(filnamn+ ' är äldre än en dag så vi raderar den.',sender);
-            deletefile(datapath+filnamn);
+          try
+            filedate := fileage(datapath+filnamn);
+            if FileDateToDateTime(filedate) + 1 < now  then begin
+              Rapportera(filnamn+ ' är äldre än en dag så vi raderar den.',sender);
+              deletefile(datapath+filnamn);
+            end;
+
+          except
+            on e: exception do begin
+              Rapportera(e.Message,sender);
+            end;
           end;
-
-
         end;
 
 
@@ -435,6 +443,9 @@ begin
   xslpp.Active := false; //stäng av xsl-komponenten
   xmldocument1.Active := false; //Stäng av xml-komponenten
 
+  infil.text := temptext;
+  infil.SaveToFile(exepath+'efterXSLT.xml');
+
   infil.text := UTF8Decode(temptext);
   if infil.text = '' then infil.text := temptext;
   
@@ -456,22 +467,29 @@ begin
                   </image>
 }
 
-  while pos('[#BILD:',infil.text)  > 0 do begin  //Gå igenom alla ställen där vi lagt variabeln [#BILD:
-    enbild := hamtastrengink(infil.text,'[#BILD:',']'); //Hämta själva bildinfon
-    nummer := hamtastrengmellan(enbild,'[#BILD:a',']');  //Plocka ut numret
-    inummer := strtointdef(nummer,0)+1;   //Omvandla till en integer och lägg på 1
-    nummer := rightstr('0'+inttostr(inummer),2); //Skapa ett nytt tresiffrigt nummer
-    nybild := rentfilnamn+'-'+nummer+'nh.jpg';  //Skapa ett nytt filnamn för bilden
-    infil.text := stringreplace(infil.text,enbild,nybild); //Lägg in det istället för bildinfon vi plockade ut
-    if fileexists(datapath+nybild) then begin  //Om vi har bilden tillgänglig
-      try
-        PjerMoveFile(datapath+nybild,sparpath+nybild,true);  //Flytta bilden till mappen där den ska importeras av NP, men NP bryr sig inte om jpg förrän en npdoc som refererar den kommer dit
-      except
-        on e: exception do begin
-          rapportera('Fel vid bildflytt: '+e.Message,sender);
+  if pos('[#BILD:',infil.text) > 0 then begin
+
+    while pos('[#BILD:',infil.text)  > 0 do begin  //Gå igenom alla ställen där vi lagt variabeln [#BILD:
+      enbild := hamtastrengink(infil.text,'[#BILD:',']'); //Hämta själva bildinfon
+      nummer := hamtastrengmellan(enbild,'[#BILD:a',']');  //Plocka ut numret
+      inummer := strtointdef(nummer,0)+1;   //Omvandla till en integer och lägg på 1
+      nummer := rightstr('0'+inttostr(inummer),2); //Skapa ett nytt tresiffrigt nummer
+      nybild := rentfilnamn+'-'+nummer+'nh.jpg';  //Skapa ett nytt filnamn för bilden
+      infil.text := stringreplace(infil.text,enbild,nybild); //Lägg in det istället för bildinfon vi plockade ut
+      if fileexists(datapath+nybild) then begin  //Om vi har bilden tillgänglig
+        try
+          PjerMoveFile(datapath+nybild,sparpath+nybild,true);  //Flytta bilden till mappen där den ska importeras av NP, men NP bryr sig inte om jpg förrän en npdoc som refererar den kommer dit
+        except
+          on e: exception do begin
+            rapportera('Fel vid bildflytt: '+e.Message,sender);
+          end;
         end;
       end;
     end;
+
+  end
+  else begin
+
   end;
 
   infil.SaveToFile(exepath+'testfil_steg2.xml'); //Spara filen i samma mapp som instansen. OBS - bara för teständamål
@@ -480,6 +498,16 @@ begin
     enimage := hamtastrengink(infil.Text,'<image ','</image>');
     nyimage := stringreplace(enimage,'<image ','<IMAGE '); //Ifall vi ska ha kvar bilden vill vi inte skapa en loop
     enbild := hamtastrengmellan (enimage,'<name>','</name>'); //Hämta ut själva bildnamnet
+    if fileexists(datapath+enbild) then begin  //Om vi har bilden tillgänglig
+      try
+        PjerMoveFile(datapath+enbild,sparpath+enbild,true);  //Flytta bilden till mappen där den ska importeras av NP, men NP bryr sig inte om jpg förrän en npdoc som refererar den kommer dit
+      except
+        on e: exception do begin
+          rapportera('Fel vid bildflytt: '+e.Message,sender);
+        end;
+      end;
+    end;
+
     if fileexists(sparpath+enbild) then begin //Om bildfilen finns tillgänglig för NP-importen
       infil.text := stringreplace(infil.text,enimage,nyimage); //Då byter vi bara ut så vi inte loopar
     end
