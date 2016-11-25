@@ -3,7 +3,7 @@ unit npimportu;
 interface
 
 uses
-  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,inifiles,strutils,
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,inifiles,strutils,dateutils,
   StdCtrls, ComCtrls, ExtCtrls, FileCtrl,shellapi, xmldom, XMLIntf,tt_ttsystem,tt_tttextconv,
   XSLProd, msxmldom, XMLDoc, faststrings,Menus,tt_ttstring,tt_ttdatetime,TTToolsDeluxe_tlb,
   tt_ttfile,tt_ttclasses,ttcompression,tt_news_ttnitf;
@@ -44,10 +44,10 @@ type
   public
     { Public declarations }
     utfil,infil : tstringlist;
-    exepath, datapath,sparpath,loggfilnamn,temppath : string;
+    exepath, datapath,sparpath,loggfilnamn,temppath,loggmapp : string;
     programnamn,programversion,programid : string;
     inifil : tinifile;
-    intervall : integer;
+    intervall,paustid,spardagar : integer;
   end;
 
 var
@@ -103,6 +103,15 @@ begin
   loggfilnamn := stringreplace(loggfilnamn,'[EXEPATH]',exepath);
   loggfilnamn := stringreplace(loggfilnamn,'[DATUM]',idag);
 
+  loggmapp := trim(inifil.ReadString('Settings','Importkopior',''));
+  if loggmapp <> '' then begin
+    loggmapp := fastreplace(loggmapp,'[EXEPATH]',exepath);
+    loggmapp := KollaSlutet(loggmapp,'\');
+    forcedirectories(loggmapp);
+  end;
+
+  spardagar := inifil.ReadInteger('settings','Spara_Importkopior',7);
+
   if inifil.ValueExists('Placering','Top') then begin
     Top := inifil.ReadInteger('Placering','Top',100);
     Left := inifil.ReadInteger('Placering','LEft',100);
@@ -113,7 +122,6 @@ begin
   NPimp.Caption := NPimp.caption + ' Startad: '+idag+' '+klockannu; //Tala om i huvudraden när programmet startades
 
   Skrivtilllogg('NP import startat',loggfilnamn);
-
   Rapportera ('Startar NPimport '+idag+' '+klockannu,sender);
 
 end;
@@ -214,6 +222,17 @@ begin
       end;
     end;
 
+    paustid := inifil.ReadInteger('settings','Paustid',10000);
+    spardagar := inifil.ReadInteger('settings','Spara_Importkopior',7);
+
+    try
+      if (loggmapp <> '') and (inifil.ReadString('Rensning','Importkopior','') <> idag) then begin
+        RensaGamlaFiler(loggmapp,'*.*',spardagar);
+        inifil.WriteString('Rensning','Importkopior',idag);
+      end;
+    except
+    end;
+
   finally
     mapplista.free;
     timer1.Interval := intervall; //Ställ in intervall
@@ -253,7 +272,7 @@ begin
   if filer.Items.Count > 0 then begin //Om vi har några filer att behandla
 
     senastefilnamn := '';
-    Sleep(10000); //Ta en micropaus så alla filer är färdigsparade
+    Sleep(paustid); //Ta en micropaus så alla filer är färdigsparade
 
     try // försök ... finally
 
@@ -264,7 +283,8 @@ begin
         zipfil.Directory := exepath;
         zipfil.Refresh;
 
-        Skrivtilllogg('Hittat '+filnamn,loggfilnamn); //Visa i loggrutan vad som sker
+        if not(endswith(ansilowercase(filnamn),'.jpg')) then //Vi bryr oss inte att logga jpg-filer
+          Skrivtilllogg('Hittat '+filnamn,loggfilnamn); //Visa i loggrutan vad som sker
 
 
         if (endswith(ansilowercase(filnamn),'.zip')) then begin   //Om det är en zip
@@ -323,16 +343,17 @@ begin
                 if xsltfilnamn <> '' then begin
                   ProcessaTTNITF(sender,filnamn,xsltfilnamn);  //Så bearbeta som TTNITF
                   senastefilnamn := changefileext(filnamn,'');   //Vi noterar senaste filnamn utan filtyp
-                end;  
+                end;
               end;
             end;
           end;
         end;
 
-        if endswith(ansilowercase(filnamn),'.jpg') then  begin
+
+        if (endswith(ansilowercase(filnamn),'.jpg')) and (fileexists(datapath+filnamn)) then  begin //Här är bara för att radera gamla jpg-filer som blivit kvar
           try
             filedate := fileage(datapath+filnamn);
-            if FileDateToDateTime(filedate) + 1 < now  then begin
+            if DaysBetween(FileDateToDateTime(filedate),now) > 1 then begin
               Rapportera(filnamn+ ' är äldre än en dag så vi raderar den.',sender);
               deletefile(datapath+filnamn);
             end;
@@ -345,8 +366,8 @@ begin
         end;
 
 
-        if (not (endswith(ansilowercase(filnamn),'.crdownload'))) and (not (endswith(ansilowercase(filnamn),'.jpg'))) then
-          deletefile (datapath+filnamn); //Radera andra filer som kan tänkas dyka upp
+//        if (not (endswith(ansilowercase(filnamn),'.crdownload'))) and (not (endswith(ansilowercase(filnamn),'.jpg'))) then
+//          deletefile (datapath+filnamn); //Radera andra filer som kan tänkas dyka upp
 
         nyheartbeat.SendHeartBeat;
 
@@ -355,10 +376,14 @@ begin
     finally  //slutligen
 
     end; //try finally
+
+
+
     zipfil.Directory := exepath;
     zipfil.Refresh;
 
   end; //if filer
+
 
   nyheartbeat.SendHeartBeat;
 
@@ -433,6 +458,7 @@ procedure TNPimp.ProcessaEnXMLfilmedXSLTochSparaTillNPimport (sender:tobject;fil
 var
   rentfilnamn,enbild,nybild,nummer,enimage,nyimage,temptext : string;
   inummer : integer;
+  allabilderfinns : boolean;
 begin
   xmldocument1.ParseOptions := [];  //Nollställ detta för säkerhetsskull
   xmldocument1.FileName := datapath+filnamn; //Sätt in filnamnet på XML-filen som ska bearbetas i xmldoc-komponenten
@@ -468,7 +494,6 @@ begin
 }
 
   if pos('[#BILD:',infil.text) > 0 then begin
-
     while pos('[#BILD:',infil.text)  > 0 do begin  //Gå igenom alla ställen där vi lagt variabeln [#BILD:
       enbild := hamtastrengink(infil.text,'[#BILD:',']'); //Hämta själva bildinfon
       nummer := hamtastrengmellan(enbild,'[#BILD:a',']');  //Plocka ut numret
@@ -486,48 +511,75 @@ begin
         end;
       end;
     end;
-
   end
   else begin
-
+    //Ingen [#:BILD att kolla efter
   end;
 
   infil.SaveToFile(exepath+'testfil_steg2.xml'); //Spara filen i samma mapp som instansen. OBS - bara för teständamål
 
+  allabilderfinns := true; //Vi utgår från det
+
   while pos('<image ',infil.text) > 0 do begin //Gå igenom alla image-element efter att de städats enligt ovan
     enimage := hamtastrengink(infil.Text,'<image ','</image>');
     nyimage := stringreplace(enimage,'<image ','<IMAGE '); //Ifall vi ska ha kvar bilden vill vi inte skapa en loop
-    enbild := hamtastrengmellan (enimage,'<name>','</name>'); //Hämta ut själva bildnamnet
+    //enbild := hamtastrengmellan (enimage,'<name>','</name>'); //Hämta ut själva bildnamnet
+    enbild := hamtastrengmellan (enimage,'src="','"'); //Hämta ut själva bildnamnet
+
     if fileexists(datapath+enbild) then begin  //Om vi har bilden tillgänglig
       try
         PjerMoveFile(datapath+enbild,sparpath+enbild,true);  //Flytta bilden till mappen där den ska importeras av NP, men NP bryr sig inte om jpg förrän en npdoc som refererar den kommer dit
+        Skrivtilllogg('['+idag+' '+klockannu+'] Flyttat '+enbild+' till '+sparpath,loggfilnamn);  //Logga vad vi gjort
       except
         on e: exception do begin
+          Skrivtilllogg('['+idag+' '+klockannu+'] Fel vid flytt av '+enbild+' till '+sparpath+' '+e.Message,loggfilnamn);  //Logga vad vi gjort
           rapportera('Fel vid bildflytt: '+e.Message,sender);
         end;
       end;
+    end
+    else begin
+      Skrivtilllogg('['+idag+' '+klockannu+'] Hittar inte '+enbild+' i '+datapath,loggfilnamn);  //Logga vad vi gjort
     end;
+
 
     if fileexists(sparpath+enbild) then begin //Om bildfilen finns tillgänglig för NP-importen
       infil.text := stringreplace(infil.text,enimage,nyimage); //Då byter vi bara ut så vi inte loopar
+      Skrivtilllogg('['+idag+' '+klockannu+'] Hittat '+enbild+' i '+sparpath,loggfilnamn);  //Logga vad vi gjort
     end
     else begin
+      allabilderfinns := false; //Vi saknar en bild
       infil.text := stringreplace(infil.text,enimage,'');  //Fins inte bilden tar vi bort bildreferensen för annars spricker importen
+      Skrivtilllogg('['+idag+' '+klockannu+'] Hittar inte '+enbild+' i '+sparpath,loggfilnamn);  //Logga vad vi gjort
+      break;
     end;
 
   end;
 
-  infil.text := fastreplace(infil.text,'<IMAGE ','<image '); //När vi gått igenom alla image så kan vi återställa till gement på de som är kvar.
+  if allabilderfinns then begin
 
-  infil.Text := stringreplace(infil.text,'?>',' encoding="UTF-8"?>');
-  infil.Text :=  UTF8Encode(infil.text);    //Se till att det är UTF8-encodat
+    infil.text := fastreplace(infil.text,'<IMAGE ','<image '); //När vi gått igenom alla image så kan vi återställa till gement på de som är kvar.
 
-  infil.SaveToFile(sparpath+filnamn+'.npdoc');  //Spara till mappen för att NP ska importera
-  infil.SaveToFile(exepath+'testfil_ut.xml'); //Bara för TEST-ändamål
+    infil.Text := stringreplace(infil.text,'?>',' encoding="UTF-8"?>');
+    infil.Text :=  UTF8Encode(infil.text);    //Se till att det är UTF8-encodat
 
-  Rapportera('['+idag+' '+klockannu+'] Processat '+filnamn,sender);   //Visa vad vi gjort
-  Skrivtilllogg('['+idag+' '+klockannu+'] Processat '+filnamn+' med '+xsltfil,loggfilnamn);  //Logga vad vi gjort
+    infil.SaveToFile(sparpath+filnamn+'.npdoc');  //Spara till mappen för att NP ska importera
 
+    infil.SaveToFile(exepath+'testfil_ut.xml'); //Bara för TEST-ändamål
+    if loggmapp <> '' then begin
+      infil.SaveToFile(loggmapp+idag+'_'+klockannu+'_'+filnamn);
+
+    end;
+
+    deletefile (datapath+filnamn);
+
+    Rapportera('['+idag+' '+klockannu+'] Processat '+filnamn,sender);   //Visa vad vi gjort
+    Skrivtilllogg('['+idag+' '+klockannu+'] Processat '+filnamn+' med '+xsltfil,loggfilnamn);  //Logga vad vi gjort
+  end
+  else begin
+    Rapportera('['+idag+' '+klockannu+'] Vi saknade bild, så nytt försök senare '+filnamn,sender);   //Visa vad vi gjort
+    Skrivtilllogg('['+idag+' '+klockannu+'] Vi saknade bild så nytt försök senare '+filnamn,loggfilnamn);  //Logga vad vi gjort
+
+  end;
 end;
 
 
